@@ -13,6 +13,7 @@ output_re = re.compile(r"\s*(output\s+(?:reg|wire|\s))\s*(\[.*?\])?\s*(\w+)\s*(|
 assign_re = re.compile(r"assign\s+(.?)\s=\s*(.*?);")
 verilog_module_pattern = re.compile(r"^\s*module\s+(\w+)\s*\((.*?)\);", re.DOTALL | re.MULTILINE)
 case_re = re.compile(r'\bcase\b\s*\([^)]*\)\s*begin([\s\S]*?)endcase\b', re.MULTILINE)
+case_body_pattern = re.compile(r"\s*(\[.*?\])\s*:\s*begin(?:.*\n)*?\s*end\b")
 output_assignment_pattern = re.compile(r'\s*(\S+)\s*<=\s*(.*?);')
 
 if_else_regex = (r"\s*if\s*\((.?)\)\s*begin\s(.?)\s*end\s(else\s*if\s*\((.?)\)\s*begin\s(.?)\s*end\s)(else\s*begin\s("
@@ -61,7 +62,7 @@ if match:
             port_width = int(port_width)
         ports[port_name] = port_width
     # Replace parameter values in input and output declarations
-    # verilog_code = port_pattern.sub("", verilog_code)  # Remove parameter declarations from code
+
     inputs = []
     input_signals = []
     input_temp = {}
@@ -181,7 +182,6 @@ for line in verilog_code.split("\n"):
         # check for case conditions and statements
     elif always_count > 0 and case_flag and "endcase" not in line:
         if ":" in line:
-            print(line)
             case, statement = line.strip().split(":")
             match = output_assignment_pattern.match(statement)
             if match:
@@ -220,3 +220,85 @@ for line in verilog_code.split("\n"):
                 if if_dict["condition"] != "(!rst)":
                     output_signals_dict["logic"] = statement.strip() + " if " + if_dict["condition"].replace("(","").replace(")", "")
 
+case_body_matches = case_body_pattern.findall(verilog_code)
+print(if_dict)
+############################################################################################################################
+
+# Define an empty dictionary to store the output
+output_dict = {}
+
+# print(case_dict)
+
+# Extract continuous assignments
+assignments = assign_re.findall(verilog_code)
+
+# Add the module name to the dictionary
+output_dict["module_name"] = module_name
+
+# Add the parameters to the dictionary
+ports_dict = {}
+for name, value in ports.items():
+    ports_dict[name] = value
+
+output_dict["ports"] = ports_dict
+
+# Add the inputs to the dictionary
+inputs_dict = {}
+for name, width in inputs:
+    inputs_dict[name] = width
+
+output_dict["input_ports"] = inputs_dict
+
+# Add the outputs to the dictionary
+outputs_dict = {}
+for name, width in outputs:
+    outputs_dict[name] = width
+
+output_dict["output_ports"] = outputs_dict
+
+if always_dict[f"always_{always_count}"]["sequential"] == True:
+    output_dict["clk"] = sensitive_block[0]
+    output_dict["rst"] = sensitive_block[1]
+
+
+# Add the Assignments to the dictionary
+assign_dict = {}
+for lhs, rhs in assignments:
+    assign_dict[lhs] = rhs.strip()
+
+
+output_dict["input_signals"] = input_signals
+output_dict["output_signals"] = output_signals
+# print(output_dict["input_signals"])
+# print("-----------------------------------")
+# print(output_dict["output_signals"])# there is something wrong
+
+#############################################################################
+
+
+# print("-----------------------------------------------")
+# print(output_dict)
+#
+# print("design_info = {")
+# for key, value in output_dict.items():
+#     if key in ['input_signals', 'output_signals']:
+#         print(f"    '{key}': [")
+#         for item in value:
+#             print(f"        {item},")
+#         print("    ],")
+#     else:
+#         print(f"    '{key}': '{value}',")
+# print("}")
+#
+# for key, value in always_dict.items():
+#     print(f"{key}:")
+#     if isinstance(value, dict):
+#         for inner_key, inner_value in value.items():
+#             if isinstance(inner_value, list):
+#                 print(f"    {inner_key}:")
+#                 for inner_item in inner_value:
+#                     print(f"        {inner_item}")
+#             else:
+#                 print(f"    {inner_key}: {inner_value}")
+#     else:
+#         print(f"    {value}")
