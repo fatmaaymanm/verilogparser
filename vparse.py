@@ -12,6 +12,8 @@ input_re = re.compile(r"\s*(input)\s+(\[.*?\])?\s*(\w+)\s*(,|\))")
 output_re = re.compile(r"\s*(output\s+(?:reg|wire|\s))\s*(\[.*?\])?\s*(\w+)\s*(|\))")
 assign_re = re.compile(r"assign\s+(.?)\s=\s*(.*?);")
 verilog_module_pattern = re.compile(r"^\s*module\s+(\w+)\s*\((.*?)\);", re.DOTALL | re.MULTILINE)
+case_re = re.compile(r'\bcase\b\s*\([^)]*\)\s*begin([\s\S]*?)endcase\b', re.MULTILINE)
+output_assignment_pattern = re.compile(r'\s*(\S+)\s*<=\s*(.*?);')
 
 if_else_regex = (r"\s*if\s*\((.?)\)\s*begin\s(.?)\s*end\s(else\s*if\s*\((.?)\)\s*begin\s(.?)\s*end\s)(else\s*begin\s("
                  r".*?)\s*end)?")
@@ -135,15 +137,86 @@ for line in verilog_code.split("\n"):
     # check for sequential always block
     if "always @(" in line and ("posedge" in line or "negedge" in line):
         always_count += 1
-        # sensitive_block = []
-        # sensitivity_list = re.findall(r"(posedge|negedge)\s+(\w+)", line)
-        # if sensitivity_list:
-        #     for sensitivity in sensitivity_list:
-        #         edge_type = sensitivity[0]
-        #         signal_name = sensitivity[1]
-        #         sensitivity_dict = {"signal_name": signal_name, "edge_type": edge_type}
-        #         sensitive_block.append(sensitivity_dict)
-        #         #edge_type = "posedge" if "posedge" in line else "negedge"
-        # always_dict[f"always_{always_count}"] = {"sequential": True, "sensitivity":sensitive_block, "if": [], "else if": [], "else": [], "case statement":[]}
-        # current_block = always_dict[f"always_{always_count}"]
-        # if_else_flag = None
+        sensitive_block = []
+        sensitivity_list = re.findall(r"(posedge|negedge)\s+(\w+)", line)
+        if sensitivity_list:
+            for sensitivity in sensitivity_list:
+                edge_type = sensitivity[0]
+                signal_name = sensitivity[1]
+                sensitivity_dict = {"signal_name": signal_name, "edge_type": edge_type}
+                sensitive_block.append(sensitivity_dict)
+                #edge_type = "posedge" if "posedge" in line else "negedge"
+        always_dict[f"always_{always_count}"] = {"sequential": True, "sensitivity":sensitive_block, "if": [], "else if": [], "else": [], "case statement":[]}
+        current_block = always_dict[f"always_{always_count}"]
+        if_else_flag = None
+    elif "always @(*)" in line:
+        always_count += 1
+        always_dict[f"always_{always_count}"] = {"sequential": False, "if": [], "else if": [], "else": [],                                      "case statement": []}
+        current_block = always_dict[f"always_{always_count}"]
+        if_else_flag = None
+    elif always_count > 0 and "else if" in line:
+        if_dict = {"condition": "", "statements": []}
+        current_block["else if"].append(if_dict)
+        if_line = line.replace("else if", "").replace("begin", "").strip()
+        if_dict["condition"] = if_line
+        if_else_flag = "else if"
+        # check for if statement inside always block
+    elif always_count > 0 and "if" in line:
+        if_dict = {"condition": "", "statements": []}
+        output_signals_dict = {"name": "", "logic": ""}
+        current_block["if"].append(if_dict)
+        if_line = line.replace("if", "").replace("begin", "").strip()
+        if_dict["condition"] = if_line
+        if_else_flag = "if"
+    elif always_count > 0 and "else" in line:
+        else_dict = {"statements": []}
+        current_block["else"].append(else_dict)
+        if_else_flag = "else"
+        # add line to the last if or else statement
+    elif always_count > 0 and "case" in line:
+        case_flag = True
+        output_signals_dict = {"name": "", "logic": ""}
+        case_condition = line.replace("case", "").replace("begin", "").strip()
+        case_dict[case_condition] = {}
+        # check for case conditions and statements
+    elif always_count > 0 and case_flag and "endcase" not in line:
+        if ":" in line:
+            print(line)
+            case, statement = line.strip().split(":")
+            match = output_assignment_pattern.match(statement)
+            if match:
+                output, statement = statement.replace(";", "").replace("<", "").split('=')
+                output_signals_dict["name"] = output.strip()
+            if "default" in line:
+                x = statement.strip()
+                output_signals_dict["logic"] += statement.strip()
+            else:
+                output_signals_dict["logic"] += statement.strip() + " if " + case_condition + " == " + case + " else "
+                found = False
+                for i in range(len(output_signals)):
+                    if output_signals[i]['name'] == output_signals_dict['name']:
+                        output_signals[i] = output_signals_dict
+                        found = True
+                        break
+
+                if not found:
+                    output_signals.append(output_signals_dict)
+                # print(output_signals)
+                # print(output_signals_dict)
+                case_dict[case_condition][case.strip()] = statement.strip()
+                # current_block["if"][-1]["statements"].append(line.strip())
+            # else:
+
+            # current_block["case statement"].append(case_dict)  ######### zyada now
+            # case_flag = False
+
+        elif always_count > 0 and if_else_flag == "if":
+            if line.strip() != "end":
+                if "=" in line and ";" in line:
+                    match = output_assignment_pattern.match(statement)
+                    if match:
+                        output, statement = line.replace(";", "").replace("<", "").split('=')
+                        output_signals_dict["name"] = output.strip()
+                if if_dict["condition"] != "(!rst)":
+                    output_signals_dict["logic"] = statement.strip() + " if " + if_dict["condition"].replace("(","").replace(")", "")
+
