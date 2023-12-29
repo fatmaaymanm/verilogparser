@@ -12,22 +12,14 @@ reg_pattern = re.compile(r"\s*(reg)\s+(\[.?\])?\s*(\[.*?\])?\s*(\w+)\s*(|\))")
 wire_pattern = re.compile(r"\s*(wire)\s+(\[.?\])?\s*(\[.*?\])?\s*(\w+)\s*(|\))")
 input_re = re.compile(r"\s*(input)\s+(\[.*?\])?\s*(\w+)\s*(,|\))")
 output_re = re.compile(r"\s*(output\s+(?:reg|wire|\s))\s*(\[.*?\])?\s*(\w+)\s*(|\))")
-assign_re = re.compile(r"assign\s+(.?)\s=\s*(.*?);")
+assign_re = re.compile(r"(assign)\s+(.?)\s=\s*(.*?);")
 blocking_assignment_pattern = re.compile(r'\s*(\S+)\s*(=)\s*(.*?);')
 non_blocking_assignment_pattern = re.compile(r'\s*(\S+)\s*(<=)\s*(.*?);')
-# and_operator_pattern = re.compile(r'\s*(\S+)\s*(&&)\s*(\S+)\s*')
-# or_operator_pattern = re.compile(r'\s*(\S+)\s*(\|\|)\s*(\S+)\s*')
-# not_operator_pattern = re.compile(r'\s*(\S+)\s*(!)\s*(\S+)\s*')
 logical_operator_pattern = re.compile(r'\s*(\S+)\s*(?:(!)|(&&)|(\|\|)|(^))\s*(\S+)\s*')
 
 if_else_regex = (r"\s*if\s*\((.?)\)\s*begin\s(.?)\s*end\s(else\s*if\s*\((.?)\)\s*begin\s(.?)\s*end\s)(else\s*begin\s("
                  r".*?)\s*end)?")
 if_else_blocks = re.findall(if_else_regex, verilog_code, re.DOTALL)
-
-
-LOGICAL = logical_operator_pattern.findall(verilog_code)
-
-
 
 clock_signal = None
 
@@ -57,12 +49,9 @@ module_start = verilog_code.find("module")
 # Find the end position of the module declaration (using the first semicolon after "module")
 module_end = verilog_code.find(";", module_start)
 
-
 # Extract the module name and parameters
 match = module_re.search(verilog_code)
 match2 = input_re.search(verilog_code)
-match3 = reg_pattern.search(verilog_code, module_end)
-match4 = wire_pattern.search(verilog_code, module_end)
 blocking_list = []
 non_blocking_list = []
 logical_list = []
@@ -83,13 +72,20 @@ if match:
             port_width = int(port_width)
         ports[port_name] = port_width
     regs_list = []
+    wires_list = []
+    assignments = []
+
+    match3 = reg_pattern.search(verilog_code, module_end)
+    match4 = wire_pattern.search(verilog_code, module_end)
     if match3:
-        regs_string = match3.group(0)
+        regs_string = reg_pattern.findall(verilog_code, module_end)
+        l = 0
         # Extract parameter names and values
         regs = {}
-        for match3 in reg_pattern.finditer(regs_string):
-            reg_width = match3.group(3)
-            reg_name = match3.group(4)
+        for i in regs_string:
+            reg_width = regs_string[l][2]
+            reg_name = regs_string[l][3]
+            l = l + 1
             if reg_width in regs:
                 reg_width = regs[reg_width]
             elif reg_width is None:
@@ -113,15 +109,15 @@ if match:
 
             regs_list.append(reg_temp)
 
-    wires_list = []
-
     if match4:
-        wires_string = match4.group(0)
+        wires_string = wire_pattern.findall(verilog_code, module_end)
+        l = 0
         # Extract parameter names and values
         wires = {}
-        for match4 in wire_pattern.finditer(wires_string):
-            wire_width = match4.group(3)
-            wire_name = match4.group(4)
+        for i in wires_string:
+            wire_width = wires_string[l][2]
+            wire_name = wires_string[l][3]
+            l = l + 1
             if wire_width in wires:
                 wire_width = wires[wire_width]
             elif wire_width is None:
@@ -145,7 +141,6 @@ if match:
             wire_temp = {"name": wire_name, "range": (0, (2 ** int(wire_width)) - 1)}
 
             wires_list.append(wire_temp)
-
 
     # Replace parameter values in input and output declarations
     inputs = []
@@ -197,8 +192,11 @@ if match:
             output_width = ""
         outputs.append((output_name, output_width))
 
-    # Extract continuous assignments
-    assignments = assign_re.findall(verilog_code)
+    for line in verilog_code.split("\n"):
+        if assign_re.match(line):
+            assignments.append(line)
+            print(assignments)
+
 else:
     print("Module declaration not found")
 
@@ -293,16 +291,32 @@ for line in verilog_code.split("\n"):
 
     elif always_count > 0 and if_else_flag == "if":
         if line.strip() != "end":
-            if "=" in line and ";" in line:
-                output, statement = line.replace(";", "").replace("<", "").split('=')
+            match_b = blocking_assignment_pattern.match(line)
+            match_nb = non_blocking_assignment_pattern.match(line)
+            if match_b:
+                blocking_list.append(line)
+                output, statement = line.replace(";", "").split('=')
+                output_signals_dict["name"] = output.strip()
+            elif match_nb:
+                non_blocking_list.append(line)
+                output, statement = line.replace(";", "").split('<=')
                 output_signals_dict["name"] = output.strip()
             if if_dict["condition"] != "(!rst)":
-                output_signals_dict["logic"] = statement.strip() + " if " + if_dict["condition"].replace("(","").replace(")", "")
+                output_signals_dict["logic"] = statement.strip() + " if " + if_dict["condition"].replace("(",
+                                                                                                         "").replace(
+                    ")", "")
             current_block["if"][-1]["statements"].append(line.strip())
             current_block["if"][-1]["statements"] = list(filter(None, current_block["if"][-1]["statements"]))
     elif always_count > 0 and if_else_flag == "else if":
         if line.strip() != "end":
-            output, statement = line.replace(";", "").replace("<", "").split('=')
+            match_b = blocking_assignment_pattern.match(line)
+            match_nb = non_blocking_assignment_pattern.match(line)
+            if match_b:
+                blocking_list.append(line)
+                output, statement = line.replace(";", "").split('=')
+            elif match_nb:
+                non_blocking_list.append(line)
+                output, statement = line.replace(";", "").split('<=')
             if if_dict["condition"] != "(!RST)":
                 output_signals_dict["logic"] += statement.strip() + " if " + if_dict["condition"].replace("(",
                                                                                                           "").replace(
@@ -315,12 +329,18 @@ for line in verilog_code.split("\n"):
             current_block["else if"][-1]["statements"] = list(filter(None, current_block["else if"][-1]["statements"]))
     elif always_count > 0 and if_else_flag == "else":
         if line.strip() != "end":
-            if "=" in line and ";" in line:
-                output, statement = line.replace(";", "").replace("<", "").split('=')
-                if if_dict["condition"] != "(!RST)":
-                    output_signals_dict["logic"] += " else " + statement.strip()
-                else:
-                    output_signals_dict["logic"] += statement.strip()
+            match_b = blocking_assignment_pattern.match(line)
+            match_nb = non_blocking_assignment_pattern.match(line)
+            if match_b:
+                blocking_list.append(line)
+                output, statement = line.replace(";", "").split('=')
+            elif match_nb:
+                non_blocking_list.append(line)
+                output, statement = line.replace(";", "").split('<=')
+            if if_dict["condition"] != "(!RST)":
+                output_signals_dict["logic"] += " else " + statement.strip()
+            else:
+                output_signals_dict["logic"] += statement.strip()
             found = False
             for i in range(len(output_signals)):
                 if output_signals[i]['name'] == output_signals_dict['name']:
@@ -367,9 +387,10 @@ for name, width in outputs:
 
 output_dict["output_ports"] = outputs_dict
 
-if always_dict[f"always_{always_count}"]["sequential"] == True:
-    output_dict["clk"] = sensitive_block[0]
-    output_dict["rst"] = sensitive_block[1]
+if always_count > 0:
+    if always_dict[f"always_{always_count}"]["sequential"] == True:
+        output_dict["clk"] = sensitive_block[0]
+        output_dict["rst"] = sensitive_block[1]
 
 # Add the Assignments to the dictionary
 assign_dict = {}
@@ -383,6 +404,7 @@ output_dict["wires_list"] = wires_list
 output_dict["blocking_list"] = blocking_list
 output_dict["non_blocking_list"] = non_blocking_list
 output_dict["logical_list"] = logical_list
+output_dict["assignments"] = assignments
 print(output_dict["input_signals"])
 print("-----------------------------------")
 print(output_dict["output_signals"])  # there is something wrong
@@ -395,7 +417,8 @@ print(output_dict)
 
 print("design_info = {")
 for key, value in output_dict.items():
-    if key in ['input_signals', 'output_signals', 'regs_list', 'wires_list', 'blocking_list', 'non_blocking_list', 'logical_list']:
+    if key in ['input_signals', 'output_signals', 'regs_list', 'wires_list', 'blocking_list', 'non_blocking_list',
+               'logical_list', 'assignments']:
         print(f"    '{key}': [")
         for item in value:
             print(f"        {item},")
