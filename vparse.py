@@ -1,20 +1,21 @@
 import re
 import json
 
-with open('atm.v', 'r') as file:
+with open('mux_case.v', 'r') as file:
     verilog_code = file.read()
 
 ########### PORTS ################################
 
 module_re = re.compile(r"module\s+(\w+)\s*(#\s*\((.?)\))?\s\((.*?)\);", re.DOTALL)
 port_pattern = re.compile(r"\s*(?:input|output\s+(?:reg|wire|\s)|\s)\s*(\[.*?\])?\s([\w']+)")
+reg_wire_pattern = re.compile(r"(?:reg|wire)|\s*(\[.*?\])?\s([\w']+)")
 input_re = re.compile(r"\s*(input)\s+(\[.*?\])?\s*(\w+)\s*(,|\))")
 output_re = re.compile(r"\s*(output\s+(?:reg|wire|\s))\s*(\[.*?\])?\s*(\w+)\s*(|\))")
 assign_re = re.compile(r"assign\s+(.?)\s=\s*(.*?);")
 verilog_module_pattern = re.compile(r"^\s*module\s+(\w+)\s*\((.*?)\);", re.DOTALL | re.MULTILINE)
 case_re = re.compile(r'\bcase\b\s*\([^)]*\)\s*begin([\s\S]*?)endcase\b', re.MULTILINE)
 case_body_pattern = re.compile(r"\s*(\[.*?\])\s*:\s*begin(?:.*\n)*?\s*end\b")
-output_assignment_pattern = re.compile(r'\s*(\S+)\s*<=\s*(.*?);')
+output_assignment_pattern = re.compile(r'\s*(\S+)\s*(?:<=|=)\s*(.*?);')
 
 if_else_regex = (r"\s*if\s*\((.?)\)\s*begin\s(.?)\s*end\s(else\s*if\s*\((.?)\)\s*begin\s(.?)\s*end\s)(else\s*begin\s("
                  r".*?)\s*end)?")
@@ -45,10 +46,13 @@ case_dict = {}
 # Extract the module name and parameters
 match = module_re.search(verilog_code)
 match2 = input_re.search(verilog_code)
+match3 = reg_wire_pattern.search(verilog_code)
 
 if match:
     module_name = match.group(1)
     port_string = match.group(4)
+    regs_wires = match3.group(0)
+    print(regs_wires)
     # Extract parameter names and values
     ports = {}
     for match in port_pattern.finditer(port_string):
@@ -62,7 +66,6 @@ if match:
             port_width = int(port_width)
         ports[port_name] = port_width
     # Replace parameter values in input and output declarations
-
     inputs = []
     input_signals = []
     input_temp = {}
@@ -77,14 +80,7 @@ if match:
                 input_width2 = input_width2.replace("[", "").replace("]", "")
                 input_width2 = input_width2.split(":")
                 input_width2[0] = input_width2[0].replace(list(ports.keys())[0], str(list(ports.values())[0]))
-                # # input_width[1] = input_width[1].replace(list(parameters.keys())[0], str(list(parameters.values(
-                # ))[0]))
                 input_width2 = int(input_width2[0]) + 1
-            # else:  # Otherwise, the width is constant
-            #     ## input_width = int(input_width.strip("[]"))
-            #     input_width2 = [int(i) for i in match.group(2).strip("[]").split(":")]
-            #     print(input_width2)
-                # input_width2 = input_width2[0] - input_width2[1] + 1
         else:  # If the input is not a vector, the width is 1
             input_width2 = 1
 
@@ -111,24 +107,16 @@ if match:
                 output_width2 = output_width2.replace("[", "").replace("]", "")
                 output_width2 = output_width2.split(":")
                 output_width2[0] = output_width2[0].replace(list(ports.keys())[0], str(list(ports.values())[0]))
-                # # input_width[1] = input_width[1].replace(list(parameters.keys())[0], str(list(parameters.values(
-                # ))[0]))
                 output_width2 = int(output_width2[0]) + 1
-            # else:  # Otherwise, the width is constant
-            #     ## input_width = int(input_width.strip("[]"))
-            #     input_width2 = [int(i) for i in match.group(2).strip("[]").split(":")]
-            #     print(input_width2)
-                # input_width2 = input_width2[0] - input_width2[1] + 1
-        else:  # If the input is not a vector, the width is 1
+        else:
             output_width2 = 1
 
         if output_width is None:
             output_width = ""
-
         outputs.append((output_name, output_width))
 
-#     # Extract continuous assignments
-#     assignments = assign_re.findall(verilog_code)
+    # Extract continuous assignments
+    assignments = assign_re.findall(verilog_code)
 else:
     print("Module declaration not found")
 
@@ -146,13 +134,14 @@ for line in verilog_code.split("\n"):
                 signal_name = sensitivity[1]
                 sensitivity_dict = {"signal_name": signal_name, "edge_type": edge_type}
                 sensitive_block.append(sensitivity_dict)
-                #edge_type = "posedge" if "posedge" in line else "negedge"
-        always_dict[f"always_{always_count}"] = {"sequential": True, "sensitivity":sensitive_block, "if": [], "else if": [], "else": [], "case statement":[]}
+        always_dict[f"always_{always_count}"] = {"sequential": True, "sensitivity": sensitive_block, "if": [],
+                                                 "else if": [], "else": [], "case statement": []}
         current_block = always_dict[f"always_{always_count}"]
         if_else_flag = None
     elif "always @(*)" in line:
         always_count += 1
-        always_dict[f"always_{always_count}"] = {"sequential": False, "if": [], "else if": [], "else": [],                                      "case statement": []}
+        always_dict[f"always_{always_count}"] = {"sequential": False, "if": [], "else if": [], "else": [],
+                                                 "case statement": []}
         current_block = always_dict[f"always_{always_count}"]
         if_else_flag = None
     elif always_count > 0 and "else if" in line:
@@ -201,27 +190,54 @@ for line in verilog_code.split("\n"):
 
                 if not found:
                     output_signals.append(output_signals_dict)
-                # print(output_signals)
-                # print(output_signals_dict)
                 case_dict[case_condition][case.strip()] = statement.strip()
-                # current_block["if"][-1]["statements"].append(line.strip())
-            # else:
+        else:
+            current_block["case statement"].append(case_dict)  ######### zyada now
+            case_flag = False
 
-            # current_block["case statement"].append(case_dict)  ######### zyada now
-            # case_flag = False
+    elif always_count > 0 and if_else_flag == "if":
+        if line.strip() != "end":
+            if "=" in line and ";" in line:
+                output, statement = line.replace(";", "").replace("<", "").split('=')
+                output_signals_dict["name"] = output.strip()
+            if if_dict["condition"] != "(!rst)":
+                output_signals_dict["logic"] = statement.strip() + " if " + if_dict["condition"].replace("(","").replace(")", "")
+            print(output_signals_dict)
+            current_block["if"][-1]["statements"].append(line.strip())
+            current_block["if"][-1]["statements"] = list(filter(None, current_block["if"][-1]["statements"]))
+    elif always_count > 0 and if_else_flag == "else if":
+        if line.strip() != "end":
+            output, statement = line.replace(";", "").replace("<", "").split('=')
+            if if_dict["condition"] != "(!RST)":
+                output_signals_dict["logic"] += statement.strip() + " if " + if_dict["condition"].replace("(",
+                                                                                                          "").replace(
+                    ")", " ")
+            else:
+                output_signals_dict["logic"] += " else " + statement.strip() + " if " + if_dict["condition"].replace(
+                    "(", "").replace(")", " ")
 
-        elif always_count > 0 and if_else_flag == "if":
-            if line.strip() != "end":
-                if "=" in line and ";" in line:
-                    match = output_assignment_pattern.match(statement)
-                    if match:
-                        output, statement = line.replace(";", "").replace("<", "").split('=')
-                        output_signals_dict["name"] = output.strip()
-                if if_dict["condition"] != "(!rst)":
-                    output_signals_dict["logic"] = statement.strip() + " if " + if_dict["condition"].replace("(","").replace(")", "")
+            current_block["else if"][-1]["statements"].append(line.strip())
+            current_block["else if"][-1]["statements"] = list(filter(None, current_block["else if"][-1]["statements"]))
+    elif always_count > 0 and if_else_flag == "else":
+        if line.strip() != "end":
+            if "=" in line and ";" in line:
+                output, statement = line.replace(";", "").replace("<", "").split('=')
+                if if_dict["condition"] != "(!RST)":
+                    output_signals_dict["logic"] += " else " + statement.strip()
+                else:
+                    output_signals_dict["logic"] += statement.strip()
+            found = False
+            for i in range(len(output_signals)):
+                if output_signals[i]['name'] == output_signals_dict['name']:
+                    output_signals[i] = output_signals_dict
+                    found = True
+                    break
+            if not found:
+                output_signals.append(output_signals_dict)
 
-case_body_matches = case_body_pattern.findall(verilog_code)
-print(if_dict)
+            if line.strip() != "endmodule":
+                current_block["else"][-1]["statements"].append(line.strip())
+                current_block["else"][-1]["statements"] = list(filter(None, current_block["else"][-1]["statements"]))
 ############################################################################################################################
 
 # Define an empty dictionary to store the output
@@ -260,22 +276,20 @@ if always_dict[f"always_{always_count}"]["sequential"] == True:
     output_dict["clk"] = sensitive_block[0]
     output_dict["rst"] = sensitive_block[1]
 
-
 # Add the Assignments to the dictionary
 assign_dict = {}
 for lhs, rhs in assignments:
     assign_dict[lhs] = rhs.strip()
 
-
 output_dict["input_signals"] = input_signals
 output_dict["output_signals"] = output_signals
 # print(output_dict["input_signals"])
 # print("-----------------------------------")
-# print(output_dict["output_signals"])# there is something wrong
-
-#############################################################################
-
-
+# print(output_dict["output_signals"])  # there is something wrong
+#
+# ############################################################################
+#
+#
 # print("-----------------------------------------------")
 # print(output_dict)
 #
