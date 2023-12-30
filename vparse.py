@@ -1,7 +1,7 @@
 import re
 import json
 
-with open('mux_logical.v', 'r') as file:
+with open('fulladder.v', 'r') as file:
     verilog_code = file.read()
 
 ########### PORTS ################################
@@ -33,6 +33,8 @@ if match:
 always_dict = {}
 sensitivity_dict = {}
 always_count = 0
+assign_count = 0
+assignments = []
 
 # iterate through the code line by line
 current_block = None
@@ -73,7 +75,7 @@ if match:
         ports[port_name] = port_width
     regs_list = []
     wires_list = []
-    assignments = []
+
 
     match3 = reg_pattern.search(verilog_code, module_end)
     match4 = wire_pattern.search(verilog_code, module_end)
@@ -193,10 +195,16 @@ if match:
         outputs.append((output_name, output_width))
 
     for line in verilog_code.split("\n"):
-        if assign_re.match(line):
-            assignments.append(line)
-            print(assignments)
+        if "assign" in line:
+            assign_count += 1
+            assign, statement = line.strip().replace(";", " ").split("assign")
+            assignments.append(statement)
+            if "<=" in statement:
+                non_blocking_list.append(statement)
+            elif "=" in statement:
+                blocking_list.append(statement)
 
+    print(assignments)
 else:
     print("Module declaration not found")
 
@@ -360,9 +368,6 @@ output_dict = {}
 
 # print(case_dict)
 
-# Extract continuous assignments
-assignments = assign_re.findall(verilog_code)
-
 # Add the module name to the dictionary
 output_dict["module_name"] = module_name
 
@@ -392,10 +397,8 @@ if always_count > 0:
         output_dict["clk"] = sensitive_block[0]
         output_dict["rst"] = sensitive_block[1]
 
-# Add the Assignments to the dictionary
-assign_dict = {}
-for lhs, rhs in assignments:
-    assign_dict[lhs] = rhs.strip()
+
+
 
 output_dict["input_signals"] = input_signals
 output_dict["output_signals"] = output_signals
