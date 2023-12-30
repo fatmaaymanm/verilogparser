@@ -7,11 +7,11 @@ with open('fulladder.v', 'r') as file:
 ########### PORTS ################################
 
 module_re = re.compile(r"module\s+(\w+)\s*(#\s*\((.?)\))?\s\((.*?)\);", re.DOTALL)
-port_pattern = re.compile(r"\s*(?:input|output\s+(?:reg|wire|\s)|\s)\s*(\[.*?\])?\s([\w']+)")
+port_pattern = re.compile(r"\s*(?:input|output\s+?:reg|wire|\s*\s*)(\[.*?\])?\s([\w']+)")
 reg_pattern = re.compile(r"\s*(reg)\s+(\[.?\])?\s*(\[.*?\])?\s*(\w+)\s*(|\))")
 wire_pattern = re.compile(r"\s*(wire)\s+(\[.?\])?\s*(\[.*?\])?\s*(\w+)\s*(|\))")
 input_re = re.compile(r"\s*(input)\s+(\[.*?\])?\s*(\w+)\s*(,|\))")
-output_re = re.compile(r"\s*(output\s+(?:reg|wire|\s))\s*(\[.*?\])?\s*(\w+)\s*(|\))")
+output_re = re.compile(r"\s*(output\s+(?:reg\s*|wire\s*|\s*))(\[.*?\])?\s*(\w+)\s*(|\))")
 assign_re = re.compile(r"(assign)\s+(.?)\s=\s*(.*?);")
 blocking_assignment_pattern = re.compile(r'\s*(\S+)\s*(=)\s*(.*?);')
 non_blocking_assignment_pattern = re.compile(r'\s*(\S+)\s*(<=)\s*(.*?);')
@@ -66,6 +66,8 @@ if match:
     for match in port_pattern.finditer(port_string):
         port_width = match.group(1)
         port_name = match.group(2)
+        if port_name == "output" :
+            continue
         if port_width in ports:
             port_width = ports[port_width]
         elif port_width is None:
